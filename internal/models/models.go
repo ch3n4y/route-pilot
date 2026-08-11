@@ -8,7 +8,7 @@ type Segment struct {
 	Cidr        string    `gorm:"not null;uniqueIndex" json:"cidr"` // 规范化网络地址 10.0.0.0/8
 	Netmask     string    `gorm:"not null" json:"netmask"`
 	Description string    `gorm:"default:''" json:"description"`
-	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	Enabled     bool      `json:"enabled"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -18,10 +18,10 @@ type Gateway struct {
 	Name        string    `gorm:"not null" json:"name"`
 	GatewayIP   string    `gorm:"not null" json:"gateway_ip"`
 	Interface   string    `gorm:"default:''" json:"interface"`
-	IfIndex     int       `gorm:"default:0" json:"ifindex"`
+	IfIndex     int       `gorm:"default:0;column:ifindex" json:"ifindex"`
 	Metric      int       `gorm:"default:1" json:"metric"`
 	Description string    `gorm:"default:''" json:"description"`
-	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	Enabled     bool      `json:"enabled"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -32,7 +32,7 @@ type Binding struct {
 	GatewayID uint      `gorm:"not null;index:idx_seg_gw,unique" json:"gateway_id"`
 	IsActive  bool      `gorm:"default:false" json:"is_active"`
 	Position  int       `gorm:"default:0" json:"position"`
-	Enabled   bool      `gorm:"default:true" json:"enabled"`
+	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -54,7 +54,7 @@ type AppliedRoute struct {
 	Cidr       string    `gorm:"not null" json:"cidr"`
 	GatewayIP  string    `gorm:"not null" json:"gateway_ip"`
 	Metric     int       `gorm:"default:1" json:"metric"`
-	IfIndex    int       `gorm:"default:0" json:"ifindex"`
+	IfIndex    int       `gorm:"default:0;column:ifindex" json:"ifindex"`
 	Status     string    `gorm:"default:'OK'" json:"status"` // OK|MISSING|CONFLICT|ERROR
 	LastError  string    `gorm:"default:''" json:"last_error"`
 	LastSyncAt time.Time `json:"last_sync_at"`

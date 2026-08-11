@@ -19,7 +19,7 @@ func TestDesiredQuery(t *testing.T) {
 	segOff := models.Segment{Name: "禁用段", Cidr: "172.16.0.0/16", Netmask: "255.255.0.0", Enabled: false}
 	gdb.Create(&seg)
 	gdb.Create(&segOff)
-	gw := models.Gateway{Name: "GW-LAN", GatewayIP: "192.168.1.2", Metric: 1}
+	gw := models.Gateway{Name: "GW-LAN", GatewayIP: "192.168.1.2", Metric: 1, Enabled: true}
 	gwOff := models.Gateway{Name: "GW-OFF", GatewayIP: "192.168.1.3", Enabled: false}
 	gdb.Create(&gw)
 	gdb.Create(&gwOff)
