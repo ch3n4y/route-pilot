@@ -55,3 +55,18 @@ func TestParseOnLink(t *testing.T) {
 		t.Fatalf("got %+v", active)
 	}
 }
+
+func TestRouteRowCidr(t *testing.T) {
+	r := RouteRow{Dest: "10.99.0.0", Mask: "255.255.0.0"}
+	if r.Cidr() != "10.99.0.0/16" {
+		t.Fatalf("cidr = %s", r.Cidr())
+	}
+}
+
+func TestParseNetRouteJSON(t *testing.T) {
+	in := `[{"DestinationPrefix":"10.99.0.0/16","NextHop":"192.168.1.2","InterfaceIndex":14,"RouteMetric":1}]`
+	rows := parseNetRouteJSON([]byte(in))
+	if len(rows) != 1 || rows[0].Cidr() != "10.99.0.0/16" || rows[0].Gateway != "192.168.1.2" || rows[0].Metric != 1 {
+		t.Fatalf("got %+v", rows)
+	}
+}

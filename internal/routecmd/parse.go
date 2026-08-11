@@ -2,7 +2,9 @@ package routecmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 )
@@ -100,4 +102,74 @@ func ParseRoutePrint4(out []byte) (active []RouteRow, persistent []RouteRow, err
 		active = withRows[len(withRows)-2]
 		return active, persistent, nil
 	}
+}
+
+// Cidr 由 dest+mask 还原 CIDR 字符串（如 10.99.0.0 + 255.255.0.0 -> 10.99.0.0/16）。
+func (r RouteRow) Cidr() string {
+	ip := net.ParseIP(r.Dest)
+	if ip == nil {
+		return r.Dest
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return r.Dest
+	}
+	m := net.IPv4Mask(ipByte(r.Mask, 0), ipByte(r.Mask, 1), ipByte(r.Mask, 2), ipByte(r.Mask, 3))
+	ones, _ := m.Size()
+	return ip4.String() + "/" + strconv.Itoa(ones)
+}
+
+func ipByte(quad string, idx int) byte {
+	parts := strings.Split(quad, ".")
+	if len(parts) != 4 {
+		return 0
+	}
+	n, err := strconv.Atoi(parts[idx])
+	if err != nil || n < 0 || n > 255 {
+		return 0
+	}
+	return byte(n)
+}
+
+// parseNetRouteJSON 解析 Get-NetRoute -AddressFamily IPv4 | ConvertTo-Json 输出为 RouteRow。
+func parseNetRouteJSON(b []byte) []RouteRow {
+	type item struct {
+		DestinationPrefix string `json:"DestinationPrefix"`
+		NextHop           string `json:"NextHop"`
+		InterfaceIndex    int    `json:"InterfaceIndex"`
+		RouteMetric       int    `json:"RouteMetric"`
+	}
+	var list []item
+	if err := json.Unmarshal(b, &list); err != nil {
+		return nil
+	}
+	var rows []RouteRow
+	for _, it := range list {
+		dest, mask, err := splitPrefix(it.DestinationPrefix)
+		if err != nil {
+			continue
+		}
+		rows = append(rows, RouteRow{
+			Dest:       dest,
+			Mask:       mask,
+			Gateway:    it.NextHop,
+			Interface:  strconv.Itoa(it.InterfaceIndex),
+			Metric:     it.RouteMetric,
+			Persistent: false,
+		})
+	}
+	return rows
+}
+
+func splitPrefix(p string) (string, string, error) {
+	parts := strings.SplitN(p, "/", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("bad prefix %s", p)
+	}
+	var plen int
+	if _, err := fmt.Sscanf(parts[1], "%d", &plen); err != nil {
+		return "", "", err
+	}
+	mask := net.IP(net.CIDRMask(plen, 32))
+	return parts[0], mask.String(), nil
 }
