@@ -38,7 +38,7 @@ func newTestServer(t *testing.T) (*gin.Engine, string) {
 	}
 	t.Cleanup(func() { sqlDB, _ := gdb.DB(); sqlDB.Close() })
 	eng := sync.New(gdb)
-	r := New(gdb, eng, &config.AppConfig{Host: "0.0.0.0", DataDir: t.TempDir()}, "test", true, nil)
+	r := New(gdb, eng, &config.AppConfig{Host: "0.0.0.0", DataDir: t.TempDir()}, "test", true, nil, nil)
 	return r, "tok"
 }
 

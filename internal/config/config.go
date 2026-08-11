@@ -12,6 +12,9 @@ type AppConfig struct {
 	Dev     bool
 }
 
+// DefaultPort 默认监听端口（用户在部署时指定的固定端口）。
+const DefaultPort = "38254"
+
 // Load 返回应用配置。数据目录优先 exe 所在目录（可写时），否则退回 %LOCALAPPDATA%\RouteManager。
 func Load(dev bool) *AppConfig {
 	dir := filepath.Dir(os.Args[0])
@@ -27,5 +30,5 @@ func Load(dev bool) *AppConfig {
 		f.Close()
 		_ = os.Remove(filepath.Join(dir, ".write_test"))
 	}
-	return &AppConfig{Host: "0.0.0.0", Port: 8080, DataDir: dataDir, Dev: dev}
+	return &AppConfig{Host: "0.0.0.0", Port: 38254, DataDir: dataDir, Dev: dev}
 }

@@ -27,7 +27,7 @@ func Open(cfg *config.AppConfig) (*gorm.DB, error) {
 		return nil, err
 	}
 	// seed 默认 settings
-	for k, v := range map[string]string{"host": cfg.Host, "port": "8080", "sync_on_change": "1"} {
+	for k, v := range map[string]string{"host": cfg.Host, "port": config.DefaultPort, "sync_on_change": "1"} {
 		if GetSetting(gdb, k, "") == "" {
 			_ = SetSetting(gdb, k, v)
 		}

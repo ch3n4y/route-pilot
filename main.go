@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -53,22 +55,58 @@ func main() {
 	eng := sync.New(gdb)
 	go eng.Reconcile() // 启动全量重放（防重启丢路由）
 
-	addr := cfg.Host + ":" + db.GetSetting(gdb, "port", "8080")
-	if !*dev {
-		sf, _ := staticFS()
-		r := server.New(gdb, eng, cfg, version, elevated, sf)
-		openBrowserSoon("http://127.0.0.1:" + db.GetSetting(gdb, "port", "8080"))
-		if err := r.Run(addr); err != nil {
+	port := db.GetSetting(gdb, "port", config.DefaultPort)
+	trayPort = port
+	addr := cfg.Host + ":" + port
+
+	shutdown := func() {
+		log.Println("收到退出指令，关闭服务…")
+		_ = os.Remove(filepath.Join(cfg.DataDir, ".write_test"))
+		os.Exit(0)
+	}
+
+	if *dev || *console {
+		// 控制台/dev 模式：服务在前台，退出用 Ctrl+C
+		r := server.New(gdb, eng, cfg, version, elevated, nil, shutdown)
+		if *dev {
+			log.Println("dev mode: 前端请启动 web 下的 vite (npm run dev) -> http://localhost:5173")
+		}
+		if err := runHTTPServer(addr, r, nil); err != nil {
 			log.Fatal(err)
 		}
 		return
 	}
-	// dev 模式：不内嵌、不开浏览器，仅 API（前端走 vite :5173）
-	r := server.New(gdb, eng, cfg, version, elevated, nil)
-	log.Println("dev mode: 前端请启动 web 下的 vite (npm run dev) -> http://localhost:5173")
-	if err := r.Run(addr); err != nil {
-		log.Fatal(err)
+
+	// GUI 模式：托盘常驻主循环，HTTP 服务在后台；退出经托盘/设置页
+	r := server.New(gdb, eng, cfg, version, elevated, mustStatic(), shutdown)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		openBrowserSoon("http://127.0.0.1:" + port)
+		if err := runHTTPServer(addr, r, ctx); err != nil {
+			log.Println("HTTP 服务异常: ", err)
+			cancel()
+		}
+	}()
+	runTray(func() {
+		cancel()
+	})
+	<-ctx.Done()
+	log.Println("已退出")
+}
+
+// runHTTPServer 启动 HTTP 服务；ctx 非 nil 时支持优雅关闭。
+func runHTTPServer(addr string, handler http.Handler, ctx context.Context) error {
+	srv := &http.Server{Addr: addr, Handler: handler}
+	if ctx == nil {
+		return srv.ListenAndServe()
 	}
+	go func() {
+		<-ctx.Done()
+		shCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shCtx)
+	}()
+	return srv.ListenAndServe()
 }
 
 // openLog 打开 exe 旁 RouteManager.log。

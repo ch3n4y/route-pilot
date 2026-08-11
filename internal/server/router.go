@@ -14,16 +14,17 @@ import (
 )
 
 type Server struct {
-	db       *gorm.DB
-	eng      *sync.Engine
-	cfg      *config.AppConfig
-	version  string
-	elevated bool
+	db         *gorm.DB
+	eng        *sync.Engine
+	cfg        *config.AppConfig
+	version    string
+	elevated   bool
+	onShutdown func()
 }
 
-// New 组装 gin 引擎。static 为内嵌前端（dev 模式传 nil），null 时只提供 /api。
-func New(gdb *gorm.DB, eng *sync.Engine, cfg *config.AppConfig, ver string, elevated bool, static fs.FS) *gin.Engine {
-	s := &Server{db: gdb, eng: eng, cfg: cfg, version: ver, elevated: elevated}
+// New 组装 gin 引擎。static 为内嵌前端（dev 模式传 nil），onShutdown 为"退出程序"时调用。
+func New(gdb *gorm.DB, eng *sync.Engine, cfg *config.AppConfig, ver string, elevated bool, static fs.FS, onShutdown func()) *gin.Engine {
+	s := &Server{db: gdb, eng: eng, cfg: cfg, version: ver, elevated: elevated, onShutdown: onShutdown}
 	r := gin.Default()
 
 	if cfg.Dev {
@@ -62,15 +63,29 @@ func New(gdb *gorm.DB, eng *sync.Engine, cfg *config.AppConfig, ver string, elev
 	authed.GET("/settings", s.hSettings)
 	authed.PUT("/settings", s.hUpdateSettings)
 	authed.PUT("/settings/password", s.hChangePassword)
+	authed.POST("/system/shutdown", s.hShutdown)
 
-	// 静态 + SPA 兜底（dev 模式 static 为 nil，前端走 vite）
+	// 静态 + SPA 兜底（dev 模式 static 为 nil，前端走 vite）。
+	// 不用 r.StaticFS("/")：根级 catch-all 会与 /api 路由冲突导致 gin panic。
 	if static != nil {
-		r.StaticFS("/", http.FS(static))
 		r.NoRoute(func(c *gin.Context) {
-			if strings.HasPrefix(c.Request.URL.Path, "/api") {
+			p := strings.TrimPrefix(c.Request.URL.Path, "/")
+			if strings.HasPrefix(p, "api/") {
 				c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 				return
 			}
+			if p == "" || p == "index.html" {
+				// 直接伺服 index.html（ServeFileFS 对 index.html 会 301 重定向，不适用）
+				b, _ := fs.ReadFile(static, "index.html")
+				c.Data(http.StatusOK, "text/html; charset=utf-8", b)
+				return
+			}
+			if f, err := static.Open(p); err == nil {
+				f.Close()
+				http.ServeFileFS(c.Writer, c.Request, static, p)
+				return
+			}
+			// SPA 深链接兜底
 			b, _ := fs.ReadFile(static, "index.html")
 			c.Data(http.StatusOK, "text/html; charset=utf-8", b)
 		})

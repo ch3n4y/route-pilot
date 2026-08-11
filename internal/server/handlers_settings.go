@@ -4,12 +4,13 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"route-manager/internal/auth"
+	"route-manager/internal/config"
 	"route-manager/internal/db"
 )
 
 func (s *Server) hSettings(c *gin.Context) {
 	ok(c, gin.H{
-		"port":           db.GetSetting(s.db, "port", "8080"),
+		"port":           db.GetSetting(s.db, "port", config.DefaultPort),
 		"host":           db.GetSetting(s.db, "host", s.cfg.Host),
 		"data_dir":       s.cfg.DataDir,
 		"version":        s.version,
@@ -28,7 +29,7 @@ func (s *Server) hUpdateSettings(c *gin.Context) {
 		return
 	}
 	restart := false
-	if body.Port != "" && body.Port != db.GetSetting(s.db, "port", "8080") {
+	if body.Port != "" && body.Port != db.GetSetting(s.db, "port", config.DefaultPort) {
 		if err := db.SetSetting(s.db, "port", body.Port); err != nil {
 			fail(c, 500, err.Error())
 			return

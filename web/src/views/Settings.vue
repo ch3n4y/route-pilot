@@ -29,12 +29,20 @@
         <el-button type="primary" :loading="saving" @click="changePassword">保存</el-button>
       </el-form>
     </el-card>
+
+    <el-card>
+      <template #header>程序</template>
+      <el-button type="danger" plain @click="shutdownApp">退出程序</el-button>
+      <span style="color: #909399; font-size: 13px; margin-left: 12px">
+        停止 HTTP 服务并退出（也可用系统托盘图标退出）
+      </span>
+    </el-card>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '../api'
 
 const info = ref({})
@@ -59,6 +67,16 @@ async function changePassword() {
     ElMessage.error(e.error || '修改失败')
   } finally {
     saving.value = false
+  }
+}
+
+async function shutdownApp() {
+  await ElMessageBox.confirm('确认退出程序？服务将停止。', '提示', { type: 'warning' })
+  try {
+    await http.post('/system/shutdown')
+    ElMessage.success('正在退出…')
+  } catch (e) {
+    /* 服务已停止，请求必然失败 */
   }
 }
 
