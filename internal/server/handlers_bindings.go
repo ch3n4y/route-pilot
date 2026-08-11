@@ -1,0 +1,114 @@
+package server
+
+import (
+	"github.com/gin-gonic/gin"
+
+	"route-manager/internal/models"
+)
+
+func (s *Server) hBindings(c *gin.Context) {
+	q := s.db.Model(&models.Binding{})
+	if sid := c.Query("segment_id"); sid != "" {
+		q = q.Where("segment_id = ?", atou(sid))
+	}
+	if gid := c.Query("gateway_id"); gid != "" {
+		q = q.Where("gateway_id = ?", atou(gid))
+	}
+	var items []models.Binding
+	q.Order("position").Find(&items)
+	ok(c, gin.H{"items": items})
+}
+
+func (s *Server) hCreateBinding(c *gin.Context) {
+	var body struct {
+		SegmentID uint `json:"segment_id"`
+		GatewayID uint `json:"gateway_id"`
+		Position  int  `json:"position"`
+		Enabled   *bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.SegmentID == 0 || body.GatewayID == 0 {
+		fail(c, 400, "segment_id 和 gateway_id 必填")
+		return
+	}
+	enabled := true
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
+	b := models.Binding{SegmentID: body.SegmentID, GatewayID: body.GatewayID, Position: body.Position, Enabled: enabled}
+	if err := s.db.Create(&b).Error; err != nil {
+		fail(c, 409, "绑定失败（可能已存在）: "+err.Error())
+		return
+	}
+	created(c, gin.H{"item": b})
+}
+
+func (s *Server) hUpdateBinding(c *gin.Context) {
+	id := atou(c.Param("id"))
+	if id == 0 {
+		fail(c, 400, "无效 id")
+		return
+	}
+	var body struct {
+		Position int  `json:"position"`
+		Enabled  *bool `json:"enabled"`
+		IsActive *bool `json:"is_active"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		fail(c, 400, "参数错误")
+		return
+	}
+	var b models.Binding
+	if err := s.db.First(&b, id).Error; err != nil {
+		fail(c, 404, "绑定不存在")
+		return
+	}
+	updates := map[string]any{}
+	if body.Position != 0 {
+		updates["position"] = body.Position
+	}
+	if body.Enabled != nil {
+		updates["enabled"] = *body.Enabled
+	}
+	if body.IsActive != nil {
+		updates["is_active"] = *body.IsActive
+	}
+	if len(updates) > 0 {
+		if err := s.db.Model(&b).Updates(updates).Error; err != nil {
+			fail(c, 422, err.Error())
+			return
+		}
+	}
+	s.eng.RequestSync()
+	ok(c, gin.H{"item": b})
+}
+
+func (s *Server) hDeleteBinding(c *gin.Context) {
+	id := atou(c.Param("id"))
+	if id == 0 {
+		fail(c, 400, "无效 id")
+		return
+	}
+	if err := s.db.Delete(&models.Binding{}, id).Error; err != nil {
+		fail(c, 500, err.Error())
+		return
+	}
+	s.eng.RequestSync()
+	noContent(c)
+}
+
+func (s *Server) hSetActive(c *gin.Context) {
+	var body struct {
+		SegmentID uint `json:"segment_id"`
+		GatewayID uint `json:"gateway_id"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		fail(c, 400, "参数错误")
+		return
+	}
+	if err := s.activateBinding(body.SegmentID, body.GatewayID); err != nil {
+		fail(c, 409, "切换失败: "+err.Error())
+		return
+	}
+	res := s.eng.Reconcile()
+	ok(c, gin.H{"ok": true, "status": res})
+}
