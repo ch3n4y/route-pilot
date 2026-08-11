@@ -61,7 +61,6 @@ func main() {
 
 	shutdown := func() {
 		log.Println("收到退出指令，关闭服务…")
-		_ = os.Remove(filepath.Join(cfg.DataDir, ".write_test"))
 		os.Exit(0)
 	}
 

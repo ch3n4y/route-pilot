@@ -30,6 +30,14 @@ func (s *Server) hCreateBinding(c *gin.Context) {
 		fail(c, 400, "segment_id 和 gateway_id 必填")
 		return
 	}
+	// 校验实体存在（glebarez/sqlite 无 FK 约束，应用层保证）
+	var segCnt, gwCnt int64
+	s.db.Model(&models.Segment{}).Where("id = ?", body.SegmentID).Count(&segCnt)
+	s.db.Model(&models.Gateway{}).Where("id = ?", body.GatewayID).Count(&gwCnt)
+	if segCnt == 0 || gwCnt == 0 {
+		fail(c, 409, "网段或网关不存在")
+		return
+	}
 	enabled := true
 	if body.Enabled != nil {
 		enabled = *body.Enabled

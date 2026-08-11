@@ -28,8 +28,8 @@ type Gateway struct {
 
 type Binding struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	SegmentID uint      `gorm:"not null;index:idx_seg_gw,unique" json:"segment_id"`
-	GatewayID uint      `gorm:"not null;index:idx_seg_gw,unique" json:"gateway_id"`
+	SegmentID uint      `gorm:"not null;index:idx_seg_gw,unique;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"segment_id"`
+	GatewayID uint      `gorm:"not null;index:idx_seg_gw,unique;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"gateway_id"`
 	IsActive  bool      `gorm:"default:false" json:"is_active"`
 	Position  int       `gorm:"default:0" json:"position"`
 	Enabled   bool      `json:"enabled"`

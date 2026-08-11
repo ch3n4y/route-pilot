@@ -1,6 +1,8 @@
 package server
 
 import (
+	"fmt"
+
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
@@ -139,6 +141,11 @@ func (s *Server) hDeleteSegment(c *gin.Context) {
 		fail(c, 400, "无效 id")
 		return
 	}
+	// glebarez/sqlite 不生成 FK 约束，级联由应用层保证
+	if err := s.db.Where("segment_id = ?", id).Delete(&models.Binding{}).Error; err != nil {
+		fail(c, 500, err.Error())
+		return
+	}
 	if err := s.db.Delete(&models.Segment{}, id).Error; err != nil {
 		fail(c, 500, err.Error())
 		return
@@ -148,9 +155,23 @@ func (s *Server) hDeleteSegment(c *gin.Context) {
 }
 
 // activateBinding 事务内：清该段活动，再把目标网关设为活动（upsert 绑定）。
+// 校验网段/网关存在；不存在返回错误。
 func (s *Server) activateBinding(segmentID, gatewayID uint) error {
 	if segmentID == 0 || gatewayID == 0 {
 		return gorm.ErrInvalidTransaction
+	}
+	var segCnt, gwCnt int64
+	if err := s.db.Model(&models.Segment{}).Where("id = ?", segmentID).Count(&segCnt).Error; err != nil {
+		return err
+	}
+	if segCnt == 0 {
+		return fmt.Errorf("网段 %d 不存在", segmentID)
+	}
+	if err := s.db.Model(&models.Gateway{}).Where("id = ?", gatewayID).Count(&gwCnt).Error; err != nil {
+		return err
+	}
+	if gwCnt == 0 {
+		return fmt.Errorf("网关 %d 不存在", gatewayID)
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&models.Binding{}).Where("segment_id = ?", segmentID).Update("is_active", false).Error; err != nil {

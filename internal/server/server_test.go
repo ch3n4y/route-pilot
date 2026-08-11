@@ -158,3 +158,43 @@ func itoa(n uint) string {
 	}
 	return string(b)
 }
+
+func TestDeleteCascadesBindings(t *testing.T) {
+	r, _ := newTestServer(t)
+	w := do(t, r, "POST", "/api/setup", "", map[string]string{"password": "secret123"})
+	var s struct {
+		Token string `json:"token"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &s)
+	tk := s.Token
+
+	// 建网段+网关+绑定
+	w = do(t, r, "POST", "/api/segments", tk, map[string]any{"name": "s", "cidr": "10.0.0.0/8"})
+	json.Unmarshal(w.Body.Bytes(), &struct{ Item struct{ ID uint } }{})
+	var segResp struct{ Item struct{ ID uint } }
+	json.Unmarshal(w.Body.Bytes(), &segResp)
+	segID := segResp.Item.ID
+	w = do(t, r, "POST", "/api/gateways", tk, map[string]any{"name": "g", "gateway_ip": "192.168.1.2"})
+	var gwResp struct{ Item struct{ ID uint } }
+	json.Unmarshal(w.Body.Bytes(), &gwResp)
+	gwID := gwResp.Item.ID
+	if w := do(t, r, "POST", "/api/bindings", tk, map[string]any{"segment_id": segID, "gateway_id": gwID}); w.Code != 201 {
+		t.Fatalf("create binding: %d", w.Code)
+	}
+
+	// 不存在的网段建绑定 -> 409
+	w = do(t, r, "POST", "/api/bindings", tk, map[string]any{"segment_id": 9999, "gateway_id": gwID})
+	if w.Code != 409 {
+		t.Fatalf("binding for missing segment should 409, got %d", w.Code)
+	}
+
+	// 删除网段 -> 绑定应被级联清理
+	w = do(t, r, "DELETE", "/api/segments/"+itoa(segID), tk, nil)
+	if w.Code != 204 {
+		t.Fatalf("delete segment: %d", w.Code)
+	}
+	w = do(t, r, "GET", "/api/bindings?segment_id="+itoa(segID), tk, nil)
+	if w.Code != 200 || !bytes.Contains(w.Body.Bytes(), []byte(`"items":[]`)) {
+		t.Fatalf("bindings after delete not empty: %d %s", w.Code, w.Body.String())
+	}
+}

@@ -106,6 +106,11 @@ func (s *Server) hDeleteGateway(c *gin.Context) {
 		fail(c, 400, "无效 id")
 		return
 	}
+	// glebarez/sqlite 不生成 FK 约束，级联由应用层保证
+	if err := s.db.Where("gateway_id = ?", id).Delete(&models.Binding{}).Error; err != nil {
+		fail(c, 500, err.Error())
+		return
+	}
 	if err := s.db.Delete(&models.Gateway{}, id).Error; err != nil {
 		fail(c, 500, err.Error())
 		return

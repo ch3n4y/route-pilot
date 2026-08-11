@@ -63,13 +63,7 @@ func (e *Engine) RequestSync() {
 	}
 	e.syncing = true
 	e.mu.Unlock()
-	go func() {
-		res := e.Reconcile()
-		e.mu.Lock()
-		e.result = res
-		e.syncing = false
-		e.mu.Unlock()
-	}()
+	go e.Reconcile()
 }
 
 // desired 期望态：启用网段 × 启用活动绑定 × 启用网关。
@@ -120,8 +114,17 @@ func classify(des []DesiredEntry, actual map[string]string) []Entry {
 	return out
 }
 
-// Reconcile 全量同步：分类并应用缺失路由，清理本应用不再需要的路由。
+// Reconcile 全量同步：结果写回缓存，Status()/前端轮询可拿到最新状态。
 func (e *Engine) Reconcile() Result {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	res := e.reconcile()
+	e.result = res
+	e.syncing = false
+	return res
+}
+
+func (e *Engine) reconcile() Result {
 	res := Result{Syncing: true, LastSyncAt: time.Now(), Summary: map[string]int{"ok": 0, "missing": 0, "conflict": 0, "error": 0}}
 	des, err := desired(e.db)
 	if err != nil {
@@ -134,8 +137,10 @@ func (e *Engine) Reconcile() Result {
 	}
 	res.Desired = des
 	res.Entries = classify(des, actual)
+	// 统一 summary key（小写）：OK->ok, MISSING->missing, CONFLICT->conflict, ERROR->error
+	lower := map[string]string{"OK": "ok", "MISSING": "missing", "CONFLICT": "conflict", "ERROR": "error"}
 	for _, en := range res.Entries {
-		res.Summary[en.Status]++
+		res.Summary[lower[en.Status]]++
 	}
 	for i := range res.Entries {
 		if res.Entries[i].Status != "MISSING" {
