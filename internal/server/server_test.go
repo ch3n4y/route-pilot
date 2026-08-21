@@ -53,25 +53,19 @@ func TestClearPersistentRequiresElevation(t *testing.T) {
 	}
 }
 
-func TestCreateGatewayRejectsUnreachableInterface(t *testing.T) {
+func TestCreateGatewayRequiresInterface(t *testing.T) {
 	r, _ := newTestServer(t)
-	originalInterfaceCheck := gatewayInterfaceContainsIP
-	gatewayInterfaceContainsIP = func(int, string) bool { return false }
-	t.Cleanup(func() { gatewayInterfaceContainsIP = originalInterfaceCheck })
 	w := do(t, r, "POST", "/api/gateways", "", map[string]any{
-		"name": "GW-LAN", "gateway_ip": "192.168.1.2", "ifindex": 12,
+		"name": "GW-LAN", "gateway_ip": "192.168.1.2",
 	})
 	if w.Code != 422 {
-		t.Fatalf("unreachable interface should be rejected: %d %s", w.Code, w.Body.String())
+		t.Fatalf("missing interface should be rejected: %d %s", w.Code, w.Body.String())
 	}
 }
 
 func newTestServer(t *testing.T) (*gin.Engine, string) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	originalInterfaceCheck := gatewayInterfaceContainsIP
-	gatewayInterfaceContainsIP = func(int, string) bool { return true }
-	t.Cleanup(func() { gatewayInterfaceContainsIP = originalInterfaceCheck })
 	gdb, err := db.Open(&config.AppConfig{DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)

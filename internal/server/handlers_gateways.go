@@ -9,9 +9,6 @@ import (
 	"route-manager/internal/netutil"
 )
 
-// 可在测试中替换；生产环境始终验证配置的出口接口能直达下一跳。
-var gatewayInterfaceContainsIP = netutil.InterfaceContainsIP
-
 type gatewayWithMeta struct {
 	models.Gateway
 	UsedBy []uint `json:"used_by"`
@@ -59,8 +56,8 @@ func (s *Server) hCreateGateway(c *gin.Context) {
 		fail(c, 422, "网关必须是合法 IPv4")
 		return
 	}
-	if body.IfIndex <= 0 || !gatewayInterfaceContainsIP(body.IfIndex, body.GatewayIP) {
-		fail(c, 422, "请选择包含该网关 IP 的出口接口")
+	if body.IfIndex <= 0 {
+		fail(c, 422, "请选择出口接口")
 		return
 	}
 	enabled := true
@@ -99,8 +96,8 @@ func (s *Server) hUpdateGateway(c *gin.Context) {
 	if body.IfIndex == 0 {
 		body.IfIndex = gw.IfIndex // 编辑不传时保持原有出口接口
 	}
-	if body.IfIndex <= 0 || !gatewayInterfaceContainsIP(body.IfIndex, body.GatewayIP) {
-		fail(c, 422, "请选择包含该网关 IP 的出口接口")
+	if body.IfIndex <= 0 {
+		fail(c, 422, "请选择出口接口")
 		return
 	}
 	enabled := gw.Enabled

@@ -88,7 +88,7 @@
               :label="interfaceLabel(iface)"
             />
           </el-select>
-          <div v-if="interfacesStore.interfaces.length" class="form-tip">路由将从该网卡发往网关，请选择包含网关 IP 子网的网卡</div>
+          <div v-if="interfacesStore.interfaces.length" class="form-tip">路由将从该网卡发出；允许配置非本地子网的下一跳</div>
           <div v-else class="form-tip">未发现本机有 IPv4 的网卡，无法选择出口接口</div>
         </el-form-item>
         <el-form-item label="备注">
@@ -210,10 +210,6 @@ async function save() {
     ElMessage.warning('请选择出口接口')
     return
   }
-  if (!gatewayOnSelectedInterface(form.value.gateway_ip, form.value.ifindex)) {
-    ElMessage.warning('网关 IP 不在所选出口接口的子网内，请选择能直达该网关的网卡')
-    return
-  }
   saving.value = true
   try {
     if (form.value.id) {
@@ -231,20 +227,6 @@ async function save() {
   }
 }
 
-// 所选接口子网必须包含网关 IP（Windows 下一跳要求 on-link）；无法判断时不拦截。
-function gatewayOnSelectedInterface(ip, idx) {
-  const iface = interfacesStore.interfaces.find((i) => i.index === idx)
-  if (!iface || !iface.subnets || !iface.subnets.length) return true
-  return iface.subnets.some((cidr) => ipInCidr(ip, cidr))
-}
-
-function ipInCidr(ip, cidr) {
-  const [network, prefix] = cidr.split('/')
-  const toInt = (s) => s.split('.').reduce((acc, o) => ((acc << 8) + Number(o)) >>> 0, 0)
-  const bits = prefix ? Number(prefix) : 32
-  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0
-  return (toInt(ip) & mask) === (toInt(network) & mask)
-}
 
 async function del(row) {
   try {

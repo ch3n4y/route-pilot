@@ -291,12 +291,8 @@ func (e *Engine) reconcile() Result {
 			}
 		}
 		ifIdx := d.IfIndex
-		if ifIdx <= 0 || !netutil.InterfaceContainsIP(ifIdx, d.GatewayIP) {
-			res.Entries[i].Status = "ERROR"
-			res.Entries[i].Error = "配置的出口接口不存在，或网关不在该接口子网内"
-			res.Summary[from]--
-			res.Summary["error"]++
-			continue
+		if ifIdx <= 0 {
+			ifIdx, _ = netutil.GatewayReachableOnInterface(d.GatewayIP)
 		}
 		if err := routecmd.Add(d.GatewayIP, dest, mask, d.Metric, ifIdx); err != nil {
 			res.Entries[i].Status = "ERROR"
@@ -334,8 +330,8 @@ func (e *Engine) ForceReplace(segmentID uint) error {
 		return err
 	}
 	ifIdx := gw.IfIndex
-	if ifIdx <= 0 || !netutil.InterfaceContainsIP(ifIdx, gw.GatewayIP) {
-		return fmt.Errorf("配置的出口接口不存在，或网关不在该接口子网内")
+	if ifIdx <= 0 {
+		ifIdx, _ = netutil.GatewayReachableOnInterface(gw.GatewayIP)
 	}
 	// 有效跃点：网段基础跃点 + 覆盖提升（与 desired() 同源，保证一致）。
 	metric := max(seg.Metric, 1)
