@@ -48,6 +48,7 @@ type Engine struct {
 	mu      sync.Mutex
 	result  Result
 	syncing bool
+	pending bool
 }
 
 func New(gdb *gorm.DB) *Engine {
@@ -60,10 +61,12 @@ func (e *Engine) Status() Result {
 	return e.result
 }
 
-// RequestSync 异步触发一次 reconcile（已有在进行则跳过）。
+// RequestSync 异步触发一次 reconcile。同步期间的新变更会合并为下一轮，
+// 这样网关批量选择/排序无需等待系统路由命令完成。
 func (e *Engine) RequestSync() {
 	e.mu.Lock()
 	if e.syncing {
+		e.pending = true
 		e.mu.Unlock()
 		return
 	}
@@ -194,10 +197,15 @@ func classify(des []DesiredEntry, actual map[string]routeActual) []Entry {
 // Reconcile 全量同步：结果写回缓存，Status()/前端轮询可拿到最新状态。
 func (e *Engine) Reconcile() Result {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	res := e.reconcile()
 	e.result = res
+	runAgain := e.pending
+	e.pending = false
 	e.syncing = false
+	e.mu.Unlock()
+	if runAgain {
+		e.RequestSync()
+	}
 	return res
 }
 

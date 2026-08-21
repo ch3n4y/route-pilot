@@ -221,16 +221,19 @@ function selectedGatewayIDs(row) {
 async function setGatewaySelection(row, gatewayIDs) {
   const selected = new Set(gatewayIDs)
   try {
+    const requests = []
     for (const binding of row.bindings) {
       const enabled = selected.has(binding.gateway_id)
-      if (binding.enabled !== enabled) await http.put(`/bindings/${binding.id}`, { enabled })
+      if (binding.enabled !== enabled) requests.push(http.put(`/bindings/${binding.id}`, { enabled }))
       selected.delete(binding.gateway_id)
     }
     let position = enabledBindings(row).length
     for (const gatewayID of selected) {
-      await http.post('/bindings', { segment_id: row.id, gateway_id: gatewayID, enabled: true, position: position++ })
+      requests.push(http.post('/bindings', { segment_id: row.id, gateway_id: gatewayID, enabled: true, position: position++ }))
     }
-    await http.post('/routes/sync')
+    // 后端 RequestSync 会异步合并同步；不能在 UI 中等待 route sync，
+    // 否则 route.exe 执行期间会造成网段表操作卡顿。
+    await Promise.all(requests)
     ElMessage.success('网关选择已保存')
     await load()
   } catch (e) {
@@ -253,8 +256,8 @@ async function dropBinding(row, targetBindingID) {
   ordered.splice(to, 0, moved)
   dragging.value = null
   try {
+    // 并发持久化排序；后端会在后台合并多次同步请求。
     await Promise.all(ordered.map((binding, index) => http.put(`/bindings/${binding.id}`, { position: index })))
-    await http.post('/routes/sync')
     ElMessage.success('优先级已更新')
     await load()
   } catch (e) {
