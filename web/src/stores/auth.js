@@ -1,46 +1,18 @@
 import { defineStore } from 'pinia'
 import http from '../api'
 
+// 应用仅监听 127.0.0.1，无登录流程；该 store 只缓存管理员权限状态。
 export const useAuthStore = defineStore('auth', {
-  state: () => ({
-    token: localStorage.getItem('token') || '',
-    needsSetup: false,
-    elevated: false,
-    passwordSet: false,
-  }),
+  state: () => ({ elevated: false, initialized: false }),
   actions: {
     async init() {
-      const st = await http.get('/setup/status')
-      this.needsSetup = st.needs_setup
-      if (this.token) {
-        try {
-          const me = await http.get('/me')
-          this.elevated = me.elevated
-          this.passwordSet = me.password_set
-        } catch (e) {
-          // token 失效时拦截器已清理
-        }
-      }
-    },
-    async login(pw) {
-      const r = await http.post('/login', { password: pw })
-      this.token = r.token
-      localStorage.setItem('token', r.token)
-    },
-    async setup(pw) {
-      const r = await http.post('/setup', { password: pw })
-      this.token = r.token
-      this.needsSetup = false
-      localStorage.setItem('token', r.token)
-    },
-    async logout() {
+      if (this.initialized) return
       try {
-        await http.post('/logout')
-      } catch (e) {
-        /* ignore */
+        const me = await http.get('/me')
+        this.elevated = me.elevated
+      } finally {
+        this.initialized = true
       }
-      this.token = ''
-      localStorage.removeItem('token')
     },
   },
 })

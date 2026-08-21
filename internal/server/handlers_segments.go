@@ -23,6 +23,7 @@ type bindingVM struct {
 	GatewayName string `json:"gateway_name"`
 	IsActive    bool   `json:"is_active"`
 	Enabled     bool   `json:"enabled"`
+	Position    int    `json:"position"`
 }
 
 func (s *Server) hSegments(c *gin.Context) {
@@ -46,7 +47,7 @@ func (s *Server) hSegments(c *gin.Context) {
 			if b.IsActive {
 				vm.ActiveGatewayID = b.GatewayID
 			}
-			vm.Bindings = append(vm.Bindings, bindingVM{ID: b.ID, GatewayID: b.GatewayID, GatewayName: gwName[b.GatewayID], IsActive: b.IsActive, Enabled: b.Enabled})
+			vm.Bindings = append(vm.Bindings, bindingVM{ID: b.ID, GatewayID: b.GatewayID, GatewayName: gwName[b.GatewayID], IsActive: b.IsActive, Enabled: b.Enabled, Position: b.Position})
 		}
 		items = append(items, vm)
 	}
@@ -54,16 +55,16 @@ func (s *Server) hSegments(c *gin.Context) {
 }
 
 type segmentBody struct {
-	Name        string `json:"name"`
 	Cidr        string `json:"cidr"`
+	Metric      int    `json:"metric"` // 基础跃点，默认 1；被更具体网段覆盖时由引擎自动提升
 	Description string `json:"description"`
 	Enabled     *bool  `json:"enabled"`
 }
 
 func (s *Server) hCreateSegment(c *gin.Context) {
 	var body segmentBody
-	if err := c.ShouldBindJSON(&body); err != nil || body.Name == "" || body.Cidr == "" {
-		fail(c, 400, "名称和网段必填")
+	if err := c.ShouldBindJSON(&body); err != nil || body.Cidr == "" {
+		fail(c, 400, "网段必填")
 		return
 	}
 	network, mask, err := netutil.CanonicalCIDR(body.Cidr)
@@ -71,25 +72,19 @@ func (s *Server) hCreateSegment(c *gin.Context) {
 		fail(c, 422, err.Error())
 		return
 	}
-	// 重叠检测
-	var all []models.Segment
-	s.db.Find(&all)
-	for _, ex := range all {
-		if netutil.Overlaps(ex.Cidr, network) {
-			fail(c, 422, "与现有网段 "+ex.Cidr+" 重叠")
-			return
-		}
-	}
+	metric := max(body.Metric, 1)
 	enabled := true
 	if body.Enabled != nil {
 		enabled = *body.Enabled
 	}
-	seg := models.Segment{Name: body.Name, Cidr: network, Netmask: mask, Description: body.Description, Enabled: enabled}
+	// 允许重叠/嵌套网段：19.25.22.0/24 可作为 19.25.0.0/16 的更具体路由存在。
+	// 精确重复仍被 cidr UNIQUE 拒绝。
+	seg := models.Segment{Name: network, Cidr: network, Netmask: mask, Metric: metric, Description: body.Description, Enabled: enabled}
 	if err := s.db.Create(&seg).Error; err != nil {
 		fail(c, 422, "创建失败: "+err.Error())
 		return
 	}
-	s.eng.RequestSync()
+	s.requestSync()
 	created(c, gin.H{"item": seg})
 }
 
@@ -100,22 +95,14 @@ func (s *Server) hUpdateSegment(c *gin.Context) {
 		return
 	}
 	var body segmentBody
-	if err := c.ShouldBindJSON(&body); err != nil || body.Name == "" || body.Cidr == "" {
-		fail(c, 400, "名称和网段必填")
+	if err := c.ShouldBindJSON(&body); err != nil || body.Cidr == "" {
+		fail(c, 400, "网段必填")
 		return
 	}
 	network, mask, err := netutil.CanonicalCIDR(body.Cidr)
 	if err != nil {
 		fail(c, 422, err.Error())
 		return
-	}
-	var all []models.Segment
-	s.db.Find(&all)
-	for _, ex := range all {
-		if ex.ID != id && netutil.Overlaps(ex.Cidr, network) {
-			fail(c, 422, "与现有网段 "+ex.Cidr+" 重叠")
-			return
-		}
 	}
 	var seg models.Segment
 	if err := s.db.First(&seg, id).Error; err != nil {
@@ -126,12 +113,17 @@ func (s *Server) hUpdateSegment(c *gin.Context) {
 	if body.Enabled != nil {
 		enabled = *body.Enabled
 	}
-	updates := map[string]any{"name": body.Name, "cidr": network, "netmask": mask, "description": body.Description, "enabled": enabled}
+	updates := map[string]any{"name": network, "cidr": network, "netmask": mask, "description": body.Description, "enabled": enabled}
+	if body.Metric >= 1 {
+		updates["metric"] = body.Metric
+	}
 	if err := s.db.Model(&seg).Updates(updates).Error; err != nil {
 		fail(c, 422, err.Error())
 		return
 	}
-	s.eng.RequestSync()
+	// GORM 的 map 更新不会自动刷新传入 struct，重新读取后再返回真实持久态。
+	_ = s.db.First(&seg, id).Error
+	s.requestSync()
 	ok(c, gin.H{"item": seg})
 }
 
@@ -150,7 +142,7 @@ func (s *Server) hDeleteSegment(c *gin.Context) {
 		fail(c, 500, err.Error())
 		return
 	}
-	s.eng.RequestSync()
+	s.requestSync()
 	noContent(c)
 }
 
@@ -167,29 +159,30 @@ func (s *Server) activateBinding(segmentID, gatewayID uint) error {
 	if segCnt == 0 {
 		return fmt.Errorf("网段 %d 不存在", segmentID)
 	}
-	if err := s.db.Model(&models.Gateway{}).Where("id = ?", gatewayID).Count(&gwCnt).Error; err != nil {
+	if err := s.db.Model(&models.Gateway{}).Where("id = ? AND enabled = 1", gatewayID).Count(&gwCnt).Error; err != nil {
 		return err
 	}
 	if gwCnt == 0 {
-		return fmt.Errorf("网关 %d 不存在", gatewayID)
+		return fmt.Errorf("网关 %d 不存在或已禁用", gatewayID)
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&models.Binding{}).Where("segment_id = ?", segmentID).Update("is_active", false).Error; err != nil {
-			return err
-		}
 		var b models.Binding
 		err := tx.Where("segment_id = ? AND gateway_id = ?", segmentID, gatewayID).First(&b).Error
 		if err == gorm.ErrRecordNotFound {
-			return tx.Create(&models.Binding{SegmentID: segmentID, GatewayID: gatewayID, IsActive: true, Enabled: true}).Error
+			return tx.Create(&models.Binding{SegmentID: segmentID, GatewayID: gatewayID, Enabled: true}).Error
 		}
 		if err != nil {
 			return err
 		}
-		return tx.Model(&b).Update("is_active", true).Error
+		return tx.Model(&b).Update("enabled", true).Error
 	})
 }
 
 func (s *Server) hSwitchSegment(c *gin.Context) {
+	if !s.elevated {
+		fail(c, 403, "当前不是管理员权限，无法切换系统路由")
+		return
+	}
 	id := atou(c.Param("id"))
 	if id == 0 {
 		fail(c, 400, "无效 id")
@@ -206,11 +199,15 @@ func (s *Server) hSwitchSegment(c *gin.Context) {
 		fail(c, 409, "切换失败: "+err.Error())
 		return
 	}
-	res := s.eng.Reconcile()
+	res := s.reconcileAfterSwitch()
 	ok(c, gin.H{"ok": true, "status": res})
 }
 
 func (s *Server) hBatchSwitch(c *gin.Context) {
+	if !s.elevated {
+		fail(c, 403, "当前不是管理员权限，无法切换系统路由")
+		return
+	}
 	var body struct {
 		SegmentIDs []uint `json:"segment_ids"`
 		GatewayID  uint   `json:"gateway_id"`
@@ -227,6 +224,6 @@ func (s *Server) hBatchSwitch(c *gin.Context) {
 			results = append(results, gin.H{"segment_id": sid, "ok": true})
 		}
 	}
-	res := s.eng.Reconcile()
+	res := s.reconcileAfterSwitch()
 	ok(c, gin.H{"results": results, "status": res})
 }

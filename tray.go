@@ -4,6 +4,7 @@ package main
 
 import (
 	_ "embed"
+	"log"
 
 	"github.com/getlantern/systray"
 )
@@ -26,7 +27,9 @@ func runTray(onQuit func()) {
 			for {
 				select {
 				case <-mOpen.ClickedCh:
-					openBrowser("http://127.0.0.1:" + trayPort)
+					if err := openBrowser("http://127.0.0.1:" + trayPort); err != nil {
+						log.Println("无法自动打开浏览器:", err)
+					}
 				case <-mQuit.ClickedCh:
 					if onQuit != nil {
 						onQuit()

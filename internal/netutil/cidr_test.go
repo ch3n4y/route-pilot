@@ -23,11 +23,40 @@ func TestCanonicalCIDR(t *testing.T) {
 	}
 }
 
+func TestCanonicalHostIPv4(t *testing.T) {
+	network, mask, err := CanonicalCIDR(" 192.168.27.10 ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if network != "192.168.27.10/32" || mask != "255.255.255.255" {
+		t.Fatalf("got %s %s", network, mask)
+	}
+}
+
 func TestOverlaps(t *testing.T) {
 	if !Overlaps("10.0.0.0/8", "10.5.0.0/16") {
 		t.Fatal("10.0.0.0/8 should overlap 10.5.0.0/16")
 	}
 	if Overlaps("10.0.0.0/8", "172.16.0.0/12") {
 		t.Fatal("should not overlap")
+	}
+}
+
+func TestContains(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"10.0.0.0/8", "10.5.0.0/16", true},
+		{"10.0.0.0/8", "10.5.22.0/24", true},
+		{"10.5.0.0/16", "10.0.0.0/8", false}, // b 比 a 更宽
+		{"10.5.0.0/16", "172.16.0.0/12", false},
+		{"10.0.0.0/8", "10.0.0.0/8", false}, // 相等不算严格包含
+		{"0.0.0.0/0", "192.168.1.0/24", true},
+	}
+	for _, c := range cases {
+		if got := Contains(c.a, c.b); got != c.want {
+			t.Fatalf("Contains(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
 	}
 }

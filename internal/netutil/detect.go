@@ -2,6 +2,7 @@ package netutil
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os/exec"
 	"syscall"
@@ -11,6 +12,7 @@ type InterfaceInfo struct {
 	Index          int      `json:"index"`
 	Name           string   `json:"name"`
 	IPs            []string `json:"ips"`
+	Subnets        []string `json:"subnets"` // 本接口的 IPv4 子网（CIDR，如 192.168.1.0/24）
 	DefaultGateway string   `json:"default_gateway"`
 }
 
@@ -35,6 +37,9 @@ func LocalInterfaces() ([]InterfaceInfo, error) {
 			}
 			if ipn.IP.To4() != nil {
 				info.IPs = append(info.IPs, ipn.IP.String())
+				ones, _ := ipn.Mask.Size()
+				net4 := ipn.IP.To4().Mask(ipn.Mask)
+				info.Subnets = append(info.Subnets, fmt.Sprintf("%s/%d", net4.String(), ones))
 			}
 		}
 		if len(info.IPs) > 0 {
@@ -68,6 +73,31 @@ func GatewayReachableOnInterface(gw string) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// InterfaceContainsIP 判断指定接口的子网是否包含该 IP（用于校验网关下一跳的出口选择）。
+func InterfaceContainsIP(ifIndex int, ip string) bool {
+	want := net.ParseIP(ip)
+	if want == nil || want.To4() == nil || ifIndex <= 0 {
+		return false
+	}
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return false
+	}
+	for _, it := range ifaces {
+		if it.Index != ifIndex {
+			continue
+		}
+		addrs, _ := it.Addrs()
+		for _, a := range addrs {
+			ipn, ok := a.(*net.IPNet)
+			if ok && ipn.Contains(want) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type gwEntry struct {

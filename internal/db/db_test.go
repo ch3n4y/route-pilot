@@ -41,4 +41,3 @@ func TestOneActivePerSegmentIndex(t *testing.T) {
 
 // 注：glebarez/sqlite 不生成 FK 约束，绑定级联删除与存在性校验由应用层（handlers）保证，
 // 见 internal/server 的删除/绑定 handler。
-

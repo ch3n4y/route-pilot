@@ -1,12 +1,10 @@
 <template>
-  <router-view v-if="isPublic" />
-  <el-container v-else class="layout">
-    <el-aside width="200px" class="aside">
+  <el-container class="layout">
+    <el-aside class="aside">
       <div class="brand">路由管理</div>
       <el-menu :default-active="$route.path" router>
         <el-menu-item index="/segments">网段管理</el-menu-item>
         <el-menu-item index="/gateways">网关管理</el-menu-item>
-        <el-menu-item index="/matrix">绑定矩阵</el-menu-item>
         <el-menu-item index="/routes">路由状态</el-menu-item>
         <el-menu-item index="/settings">设置</el-menu-item>
       </el-menu>
@@ -14,7 +12,7 @@
     <el-container>
       <el-header class="header">
         <el-alert
-          v-if="authStore.token && !authStore.elevated"
+      v-if="!authStore.elevated"
           type="warning"
           :closable="false"
           show-icon
@@ -23,10 +21,8 @@
           <span>当前为只读模式，无法修改路由。</span>
           <el-button size="small" style="margin-left: 12px" @click="relaunchElevated">以管理员重启</el-button>
         </el-alert>
-        <span v-else style="color: #909399">已提权</span>
         <div style="flex: 1"></div>
         <span style="color: #606266; margin-right: 16px">{{ title }}</span>
-        <el-button link @click="logout">退出登录</el-button>
       </el-header>
       <el-main class="main">
         <router-view />
@@ -36,22 +32,20 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from './stores/auth'
+import { useInterfacesStore } from './stores/interfaces'
 
 const route = useRoute()
-const router = useRouter()
 const authStore = useAuthStore()
+const interfacesStore = useInterfacesStore()
 
-const isPublic = computed(() => route.meta.public)
 const title = computed(() => route.meta.title || '')
 
-async function logout() {
-  await authStore.logout()
-  router.push('/login')
-}
+// 应用启动即预取本机网卡列表，网关表单下拉无需再等 PowerShell 探测。
+onMounted(() => interfacesStore.load())
 
 // 通过 /api/me 拿到当前提权状态后刷新页面重进，或提示手动右键管理员运行。
 function relaunchElevated() {
@@ -64,6 +58,7 @@ function relaunchElevated() {
 body { margin: 0; font-family: 'Microsoft YaHei', sans-serif; }
 .layout { height: 100vh; }
 .aside { background: #001529; }
+.aside { width: 200px; }
 .aside .brand {
   color: #fff; font-size: 18px; font-weight: 600;
   padding: 18px 20px; text-align: center;
@@ -77,4 +72,11 @@ body { margin: 0; font-family: 'Microsoft YaHei', sans-serif; }
   background: #fff;
 }
 .main { background: #f5f7fa; }
+@media (max-width: 720px) {
+  .aside { width: 72px; }
+  .aside .brand { font-size: 14px; padding: 18px 4px; }
+  .aside .el-menu-item { padding: 0 8px !important; justify-content: center; font-size: 12px; }
+  .header { padding: 0 10px; }
+  .main { padding: 12px; }
+}
 </style>

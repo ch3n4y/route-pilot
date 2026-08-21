@@ -1,6 +1,8 @@
 package server
 
 import (
+	"net"
+
 	"github.com/gin-gonic/gin"
 
 	"route-manager/internal/auth"
@@ -12,11 +14,16 @@ func (s *Server) hSetupStatus(c *gin.Context) {
 }
 
 func (s *Server) hSetup(c *gin.Context) {
+	clientIP := net.ParseIP(c.ClientIP())
+	if clientIP == nil || !clientIP.IsLoopback() {
+		fail(c, 403, "首次设置只能在运行程序的本机完成")
+		return
+	}
 	var body struct {
 		Password string `json:"password"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil || body.Password == "" {
-		fail(c, 400, "密码不能为空")
+	if err := c.ShouldBindJSON(&body); err != nil || len(body.Password) < 6 {
+		fail(c, 400, "密码至少 6 位")
 		return
 	}
 	if auth.IsSetup(s.db) {
@@ -48,6 +55,10 @@ func (s *Server) hLogin(c *gin.Context) {
 		fail(c, 400, "参数错误")
 		return
 	}
+	if !auth.IsSetup(s.db) {
+		fail(c, 409, "请先完成首次设置")
+		return
+	}
 	token, exp, okLogin := auth.Login(s.db, body.Password)
 	if !okLogin {
 		fail(c, 401, "密码错误")
@@ -63,5 +74,5 @@ func (s *Server) hLogout(c *gin.Context) {
 }
 
 func (s *Server) hMe(c *gin.Context) {
-	ok(c, gin.H{"password_set": auth.IsSetup(s.db), "elevated": s.elevated})
+	ok(c, gin.H{"elevated": s.elevated})
 }

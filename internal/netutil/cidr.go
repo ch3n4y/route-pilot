@@ -3,11 +3,20 @@ package netutil
 import (
 	"fmt"
 	"net"
+	"strings"
 )
 
 // CanonicalCIDR 规范化用户输入：10.1.2.3/8 -> 网络地址 10.0.0.0/8 + 掩码 255.0.0.0。
 // 仅 IPv4；拒绝格式错误与 IPv6。
 func CanonicalCIDR(s string) (network string, netmask string, err error) {
+	s = strings.TrimSpace(s)
+	if !strings.Contains(s, "/") {
+		ip := net.ParseIP(s)
+		if ip == nil || ip.To4() == nil {
+			return "", "", fmt.Errorf("请输入 IPv4 地址或 CIDR 网段: %s", s)
+		}
+		s += "/32"
+	}
 	ip, ipnet, err := net.ParseCIDR(s)
 	if err != nil {
 		return "", "", fmt.Errorf("CIDR 格式错误: %s", s)
@@ -54,4 +63,17 @@ func Overlaps(a, b string) bool {
 		return false
 	}
 	return na.Contains(nb.IP) || nb.Contains(na.IP)
+}
+
+// Contains 判断 a 是否严格包含 b（b 是 a 的真子网，前缀长度严格更短）。
+// 用于有效跃点计算：a 每盖住一个更具体的活动路由，其跃点自动 +1。
+func Contains(a, b string) bool {
+	_, na, err1 := net.ParseCIDR(a)
+	_, nb, err2 := net.ParseCIDR(b)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	onesA, _ := na.Mask.Size()
+	onesB, _ := nb.Mask.Size()
+	return onesA < onesB && na.Contains(nb.IP)
 }

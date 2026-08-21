@@ -8,24 +8,41 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"route-manager/internal/auth"
 	"route-manager/internal/config"
+	"route-manager/internal/db"
 	"route-manager/internal/sync"
 )
 
 type Server struct {
-	db         *gorm.DB
-	eng        *sync.Engine
-	cfg        *config.AppConfig
-	version    string
-	elevated   bool
-	onShutdown func()
+	db       *gorm.DB
+	eng      *sync.Engine
+	cfg      *config.AppConfig
+	version  string
+	elevated bool
+	port     string // 实际运行端口（端口被占用时自动 +1，设置页展示用）
 }
 
-// New 组装 gin 引擎。static 为内嵌前端（dev 模式传 nil），onShutdown 为"退出程序"时调用。
-func New(gdb *gorm.DB, eng *sync.Engine, cfg *config.AppConfig, ver string, elevated bool, static fs.FS, onShutdown func()) *gin.Engine {
-	s := &Server{db: gdb, eng: eng, cfg: cfg, version: ver, elevated: elevated, onShutdown: onShutdown}
+// requestSync 遵循“变更自动同步”设置，且只在管理员模式写系统路由。
+func (s *Server) requestSync() {
+	if s.elevated && db.GetSetting(s.db, "sync_on_change", "1") == "1" {
+		s.eng.RequestSync()
+	}
+}
+
+func (s *Server) reconcileAfterSwitch() sync.Result {
+	if db.GetSetting(s.db, "sync_on_change", "1") == "1" {
+		return s.eng.Reconcile()
+	}
+	return s.eng.Status()
+}
+
+// New 组装 gin 引擎。port 为实际运行端口（设置页展示用）；static 为内嵌前端（dev 模式传 nil）。
+func New(gdb *gorm.DB, eng *sync.Engine, cfg *config.AppConfig, ver string, elevated bool, port string, static fs.FS) *gin.Engine {
+	s := &Server{db: gdb, eng: eng, cfg: cfg, version: ver, elevated: elevated, port: port}
 	r := gin.Default()
+	// 管理程序不部署在反向代理后；禁用默认的“信任所有代理”，避免伪造
+	// X-Forwarded-For 绕过首次设置的本机来源限制。
+	_ = r.SetTrustedProxies(nil)
 
 	if cfg.Dev {
 		r.Use(corsLocalhost())
@@ -33,37 +50,30 @@ func New(gdb *gorm.DB, eng *sync.Engine, cfg *config.AppConfig, ver string, elev
 
 	api := r.Group("/api")
 	api.GET("/health", func(c *gin.Context) { ok(c, gin.H{"ok": true, "version": ver}) })
-	api.GET("/setup/status", s.hSetupStatus)
-	api.POST("/setup", s.hSetup)
-	api.POST("/login", s.hLogin)
-
-	authed := api.Group("")
-	authed.Use(auth.Middleware(gdb))
-	authed.GET("/me", s.hMe)
-	authed.POST("/logout", s.hLogout)
-	authed.GET("/segments", s.hSegments)
-	authed.POST("/segments", s.hCreateSegment)
-	authed.PUT("/segments/:id", s.hUpdateSegment)
-	authed.DELETE("/segments/:id", s.hDeleteSegment)
-	authed.POST("/segments/:id/switch", s.hSwitchSegment)
-	authed.POST("/segments/batch-switch", s.hBatchSwitch)
-	authed.GET("/gateways", s.hGateways)
-	authed.POST("/gateways", s.hCreateGateway)
-	authed.PUT("/gateways/:id", s.hUpdateGateway)
-	authed.DELETE("/gateways/:id", s.hDeleteGateway)
-	authed.GET("/network/interfaces", s.hNetworkInterfaces)
-	authed.GET("/bindings", s.hBindings)
-	authed.POST("/bindings", s.hCreateBinding)
-	authed.PUT("/bindings/:id", s.hUpdateBinding)
-	authed.DELETE("/bindings/:id", s.hDeleteBinding)
-	authed.POST("/bindings/set-active", s.hSetActive)
-	authed.GET("/routes/status", s.hRouteStatus)
-	authed.POST("/routes/sync", s.hRouteSync)
-	authed.GET("/routes/actual", s.hRouteActual)
-	authed.GET("/settings", s.hSettings)
-	authed.PUT("/settings", s.hUpdateSettings)
-	authed.PUT("/settings/password", s.hChangePassword)
-	authed.POST("/system/shutdown", s.hShutdown)
+	api.GET("/me", s.hMe)
+	api.GET("/segments", s.hSegments)
+	api.POST("/segments", s.hCreateSegment)
+	api.PUT("/segments/:id", s.hUpdateSegment)
+	api.DELETE("/segments/:id", s.hDeleteSegment)
+	api.POST("/segments/:id/switch", s.hSwitchSegment)
+	api.POST("/segments/batch-switch", s.hBatchSwitch)
+	api.GET("/gateways", s.hGateways)
+	api.POST("/gateways", s.hCreateGateway)
+	api.PUT("/gateways/:id", s.hUpdateGateway)
+	api.DELETE("/gateways/:id", s.hDeleteGateway)
+	api.GET("/network/interfaces", s.hNetworkInterfaces)
+	api.GET("/bindings", s.hBindings)
+	api.POST("/bindings", s.hCreateBinding)
+	api.PUT("/bindings/:id", s.hUpdateBinding)
+	api.DELETE("/bindings/:id", s.hDeleteBinding)
+	api.POST("/bindings/set-active", s.hSetActive)
+	api.GET("/routes/status", s.hRouteStatus)
+	api.POST("/routes/sync", s.hRouteSync)
+	api.POST("/routes/resolve-conflicts", s.hResolveConflicts)
+	api.POST("/routes/delete", s.hDeleteActualRoute)
+	api.POST("/routes/clear-persistent", s.hClearPersistent)
+	api.GET("/routes/actual", s.hRouteActual)
+	api.GET("/settings", s.hSettings)
 
 	// 静态 + SPA 兜底（dev 模式 static 为 nil，前端走 vite）。
 	// 不用 r.StaticFS("/")：根级 catch-all 会与 /api 路由冲突导致 gin panic。

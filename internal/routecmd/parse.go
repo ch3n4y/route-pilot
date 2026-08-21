@@ -71,6 +71,10 @@ func ParseRoutePrint4(out []byte) (active []RouteRow, persistent []RouteRow, err
 			} else {
 				r.Gateway = "on-link"
 			}
+			// 活动路由通常为 dest mask gateway interface metric；持久路由无 interface。
+			if len(f) >= 5 && isIPv4(f[3]) {
+				r.Interface = f[3]
+			}
 			// 行内找 metric（从后往前第一个数字 token）
 			metric := 0
 			for i := len(f) - 1; i >= 2; i-- {
@@ -141,7 +145,13 @@ func parseNetRouteJSON(b []byte) []RouteRow {
 	}
 	var list []item
 	if err := json.Unmarshal(b, &list); err != nil {
-		return nil
+		// ConvertTo-Json 在只有一条记录时输出对象而非数组。
+		// 路由读取不能因此把一个有效路由表误判为“无数据”。
+		var one item
+		if err := json.Unmarshal(b, &one); err != nil {
+			return nil
+		}
+		list = []item{one}
 	}
 	var rows []RouteRow
 	for _, it := range list {

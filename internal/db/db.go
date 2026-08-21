@@ -26,8 +26,8 @@ func Open(cfg *config.AppConfig) (*gorm.DB, error) {
 		ON bindings (segment_id) WHERE is_active = 1`).Error; err != nil {
 		return nil, err
 	}
-	// seed 默认 settings
-	for k, v := range map[string]string{"host": cfg.Host, "port": config.DefaultPort, "sync_on_change": "1"} {
+	// seed 默认 settings（端口已由启动时自动检测管理，不再作为持久化设置）
+	for k, v := range map[string]string{"host": cfg.Host, "sync_on_change": "1"} {
 		if GetSetting(gdb, k, "") == "" {
 			_ = SetSetting(gdb, k, v)
 		}

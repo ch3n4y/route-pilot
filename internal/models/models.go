@@ -4,9 +4,10 @@ import "time"
 
 type Segment struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	Name        string    `gorm:"not null" json:"name"`
+	Name        string    `gorm:"not null" json:"-"`
 	Cidr        string    `gorm:"not null;uniqueIndex" json:"cidr"` // 规范化网络地址 10.0.0.0/8
 	Netmask     string    `gorm:"not null" json:"netmask"`
+	Metric      int       `gorm:"default:1" json:"metric"` // 基础跃点；被更具体网段覆盖时由引擎自动提升（有效跃点）
 	Description string    `gorm:"default:''" json:"description"`
 	Enabled     bool      `json:"enabled"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -19,7 +20,6 @@ type Gateway struct {
 	GatewayIP   string    `gorm:"not null" json:"gateway_ip"`
 	Interface   string    `gorm:"default:''" json:"interface"`
 	IfIndex     int       `gorm:"default:0;column:ifindex" json:"ifindex"`
-	Metric      int       `gorm:"default:1" json:"metric"`
 	Description string    `gorm:"default:''" json:"description"`
 	Enabled     bool      `json:"enabled"`
 	CreatedAt   time.Time `json:"created_at"`

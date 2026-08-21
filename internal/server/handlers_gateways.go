@@ -9,6 +9,9 @@ import (
 	"route-manager/internal/netutil"
 )
 
+// 可在测试中替换；生产环境始终验证配置的出口接口能直达下一跳。
+var gatewayInterfaceContainsIP = netutil.InterfaceContainsIP
+
 type gatewayWithMeta struct {
 	models.Gateway
 	UsedBy []uint `json:"used_by"`
@@ -28,7 +31,11 @@ func (s *Server) hGateways(c *gin.Context) {
 	}
 	items := make([]gatewayWithMeta, 0, len(gws))
 	for _, g := range gws {
-		items = append(items, gatewayWithMeta{Gateway: g, UsedBy: usedBy[g.ID]})
+		segments := usedBy[g.ID]
+		if segments == nil {
+			segments = []uint{}
+		}
+		items = append(items, gatewayWithMeta{Gateway: g, UsedBy: segments})
 	}
 	ok(c, gin.H{"items": items})
 }
@@ -38,7 +45,6 @@ type gatewayBody struct {
 	GatewayIP   string `json:"gateway_ip"`
 	Interface   string `json:"interface"`
 	IfIndex     int    `json:"ifindex"`
-	Metric      int    `json:"metric"`
 	Description string `json:"description"`
 	Enabled     *bool  `json:"enabled"`
 }
@@ -53,12 +59,16 @@ func (s *Server) hCreateGateway(c *gin.Context) {
 		fail(c, 422, "网关必须是合法 IPv4")
 		return
 	}
+	if body.IfIndex <= 0 || !gatewayInterfaceContainsIP(body.IfIndex, body.GatewayIP) {
+		fail(c, 422, "请选择包含该网关 IP 的出口接口")
+		return
+	}
 	enabled := true
 	if body.Enabled != nil {
 		enabled = *body.Enabled
 	}
 	gw := models.Gateway{Name: body.Name, GatewayIP: body.GatewayIP, Interface: body.Interface,
-		IfIndex: body.IfIndex, Metric: body.Metric, Description: body.Description, Enabled: enabled}
+		IfIndex: body.IfIndex, Description: body.Description, Enabled: enabled}
 	if err := s.db.Create(&gw).Error; err != nil {
 		fail(c, 422, err.Error())
 		return
@@ -86,17 +96,25 @@ func (s *Server) hUpdateGateway(c *gin.Context) {
 		fail(c, 404, "网关不存在")
 		return
 	}
+	if body.IfIndex == 0 {
+		body.IfIndex = gw.IfIndex // 编辑不传时保持原有出口接口
+	}
+	if body.IfIndex <= 0 || !gatewayInterfaceContainsIP(body.IfIndex, body.GatewayIP) {
+		fail(c, 422, "请选择包含该网关 IP 的出口接口")
+		return
+	}
 	enabled := gw.Enabled
 	if body.Enabled != nil {
 		enabled = *body.Enabled
 	}
 	updates := map[string]any{"name": body.Name, "gateway_ip": body.GatewayIP, "interface": body.Interface,
-		"ifindex": body.IfIndex, "metric": body.Metric, "description": body.Description, "enabled": enabled}
+		"ifindex": body.IfIndex, "description": body.Description, "enabled": enabled}
 	if err := s.db.Model(&gw).Updates(updates).Error; err != nil {
 		fail(c, 422, err.Error())
 		return
 	}
-	s.eng.RequestSync()
+	_ = s.db.First(&gw, id).Error
+	s.requestSync()
 	ok(c, gin.H{"item": gw})
 }
 
@@ -115,7 +133,7 @@ func (s *Server) hDeleteGateway(c *gin.Context) {
 		fail(c, 500, err.Error())
 		return
 	}
-	s.eng.RequestSync()
+	s.requestSync()
 	noContent(c)
 }
 

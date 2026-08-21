@@ -21,9 +21,9 @@ func (s *Server) hBindings(c *gin.Context) {
 
 func (s *Server) hCreateBinding(c *gin.Context) {
 	var body struct {
-		SegmentID uint `json:"segment_id"`
-		GatewayID uint `json:"gateway_id"`
-		Position  int  `json:"position"`
+		SegmentID uint  `json:"segment_id"`
+		GatewayID uint  `json:"gateway_id"`
+		Position  int   `json:"position"`
 		Enabled   *bool `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil || body.SegmentID == 0 || body.GatewayID == 0 {
@@ -47,6 +47,7 @@ func (s *Server) hCreateBinding(c *gin.Context) {
 		fail(c, 409, "绑定失败（可能已存在）: "+err.Error())
 		return
 	}
+	s.requestSync()
 	created(c, gin.H{"item": b})
 }
 
@@ -57,7 +58,7 @@ func (s *Server) hUpdateBinding(c *gin.Context) {
 		return
 	}
 	var body struct {
-		Position int  `json:"position"`
+		Position *int  `json:"position"`
 		Enabled  *bool `json:"enabled"`
 		IsActive *bool `json:"is_active"`
 	}
@@ -70,15 +71,21 @@ func (s *Server) hUpdateBinding(c *gin.Context) {
 		fail(c, 404, "绑定不存在")
 		return
 	}
+	if body.IsActive != nil && *body.IsActive && !s.elevated {
+		fail(c, 403, "当前不是管理员权限，无法切换系统路由")
+		return
+	}
 	updates := map[string]any{}
-	if body.Position != 0 {
-		updates["position"] = body.Position
+	if body.Position != nil {
+		updates["position"] = *body.Position
 	}
 	if body.Enabled != nil {
 		updates["enabled"] = *body.Enabled
 	}
 	if body.IsActive != nil {
-		updates["is_active"] = *body.IsActive
+		if !*body.IsActive {
+			updates["is_active"] = false
+		}
 	}
 	if len(updates) > 0 {
 		if err := s.db.Model(&b).Updates(updates).Error; err != nil {
@@ -86,7 +93,16 @@ func (s *Server) hUpdateBinding(c *gin.Context) {
 			return
 		}
 	}
-	s.eng.RequestSync()
+	if body.IsActive != nil && *body.IsActive {
+		if err := s.activateBinding(b.SegmentID, b.GatewayID); err != nil {
+			fail(c, 409, "切换失败: "+err.Error())
+			return
+		}
+		s.reconcileAfterSwitch()
+	} else {
+		s.requestSync()
+	}
+	_ = s.db.First(&b, id).Error
 	ok(c, gin.H{"item": b})
 }
 
@@ -100,11 +116,15 @@ func (s *Server) hDeleteBinding(c *gin.Context) {
 		fail(c, 500, err.Error())
 		return
 	}
-	s.eng.RequestSync()
+	s.requestSync()
 	noContent(c)
 }
 
 func (s *Server) hSetActive(c *gin.Context) {
+	if !s.elevated {
+		fail(c, 403, "当前不是管理员权限，无法切换系统路由")
+		return
+	}
 	var body struct {
 		SegmentID uint `json:"segment_id"`
 		GatewayID uint `json:"gateway_id"`
@@ -117,6 +137,6 @@ func (s *Server) hSetActive(c *gin.Context) {
 		fail(c, 409, "切换失败: "+err.Error())
 		return
 	}
-	res := s.eng.Reconcile()
+	res := s.reconcileAfterSwitch()
 	ok(c, gin.H{"ok": true, "status": res})
 }

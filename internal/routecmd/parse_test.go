@@ -30,7 +30,7 @@ func TestParseRoutePrint4(t *testing.T) {
 		t.Fatalf("active routes = %d, want 2", len(active))
 	}
 	if active[1].Dest != "10.99.0.0" || active[1].Mask != "255.255.0.0" ||
-		active[1].Gateway != "192.168.1.2" || active[1].Metric != 11 {
+		active[1].Gateway != "192.168.1.2" || active[1].Interface != "192.168.1.9" || active[1].Metric != 11 {
 		t.Fatalf("active[1] = %+v", active[1])
 	}
 	if len(persistent) != 1 || persistent[0].Gateway != "192.168.1.2" {
@@ -67,6 +67,14 @@ func TestParseNetRouteJSON(t *testing.T) {
 	in := `[{"DestinationPrefix":"10.99.0.0/16","NextHop":"192.168.1.2","InterfaceIndex":14,"RouteMetric":1}]`
 	rows := parseNetRouteJSON([]byte(in))
 	if len(rows) != 1 || rows[0].Cidr() != "10.99.0.0/16" || rows[0].Gateway != "192.168.1.2" || rows[0].Metric != 1 {
+		t.Fatalf("got %+v", rows)
+	}
+}
+
+func TestParseNetRouteJSONSingleObject(t *testing.T) {
+	in := `{"DestinationPrefix":"10.99.0.0/16","NextHop":"192.168.1.2","InterfaceIndex":14,"RouteMetric":1}`
+	rows := parseNetRouteJSON([]byte(in))
+	if len(rows) != 1 || rows[0].Cidr() != "10.99.0.0/16" || rows[0].Metric != 1 {
 		t.Fatalf("got %+v", rows)
 	}
 }
