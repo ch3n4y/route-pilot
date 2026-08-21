@@ -68,7 +68,14 @@
                 @dragstart="startDrag(row.id, binding.id)"
                 @dragover.prevent
                 @drop="dropBinding(row, binding.id)"
-              ><span class="drag-handle">⠿</span><el-tag size="small" type="success">{{ index + 1 }}. {{ binding.gateway_name || `#${binding.gateway_id}` }}</el-tag></div>
+              >
+                <span class="drag-handle">⠿</span>
+                <el-tag size="small" type="success">{{ index + 1 }}. {{ binding.gateway_name || `#${binding.gateway_id}` }}</el-tag>
+                <span class="priority-actions">
+                  <el-button link size="small" :disabled="index === 0" @click.stop="moveBinding(row, index, -1)">↑</el-button>
+                  <el-button link size="small" :disabled="index === enabledBindings(row).length - 1" @click.stop="moveBinding(row, index, 1)">↓</el-button>
+                </span>
+              </div>
               <span v-if="!enabledBindings(row).length" class="muted">未选择网关</span>
             </div>
           </template>
@@ -255,6 +262,18 @@ async function dropBinding(row, targetBindingID) {
   const [moved] = ordered.splice(from, 1)
   ordered.splice(to, 0, moved)
   dragging.value = null
+  await persistBindingOrder(row, ordered)
+}
+
+async function moveBinding(row, index, offset) {
+  const ordered = enabledBindings(row)
+  const target = index + offset
+  if (target < 0 || target >= ordered.length) return
+  ;[ordered[index], ordered[target]] = [ordered[target], ordered[index]]
+  await persistBindingOrder(row, ordered)
+}
+
+async function persistBindingOrder(row, ordered) {
   try {
     // 并发持久化排序；后端会在后台合并多次同步请求。
     await Promise.all(ordered.map((binding, index) => http.put(`/bindings/${binding.id}`, { position: index })))
@@ -306,9 +325,10 @@ onMounted(load)
 .card-title, .primary-cell { color: #303133; font-weight: 600; }
 .card-title { font-size: 16px; }
 .card-subtitle, .secondary-cell, .muted { margin-top: 4px; color: #909399; font-size: 12px; }
-.priority-list { display: flex; gap: 6px; flex-wrap: wrap; }
-.priority-item { cursor: grab; user-select: none; }
+.priority-list { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.priority-item { display: flex; align-items: center; cursor: grab; user-select: none; }
 .drag-handle { color: #909399; margin-right: 3px; }
+.priority-actions { display: inline-flex; margin-left: 6px; gap: 2px; }
 .form-tip { color: #909399; font-size: 12px; line-height: 1.5; }
 code { font-family: Consolas, monospace; }
 </style>
