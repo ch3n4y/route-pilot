@@ -1,0 +1,78 @@
+name: Build latest release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "显示在应用和 Release 标题中的版本号"
+        required: true
+        default: "latest"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build web assets
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Test and build Windows executable
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ inputs.version }}
+          CGO_ENABLED: 0
+        run: |
+          go test ./...
+          New-Item -ItemType Directory -Force dist | Out-Null
+          go build -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$env:APP_VERSION" -o "dist/RoutePilot.exe" .
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RoutePilot-${{ inputs.version }}
+          path: dist/RoutePilot.exe
+          if-no-files-found: error
+
+      - name: Replace GitHub latest release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+          APP_VERSION: ${{ inputs.version }}
+        run: |
+          # 删除所有既有 Release；保留其 tag，避免误删用户手工创建的标签。
+          $releases = gh api --paginate "repos/$env:REPOSITORY/releases" | ConvertFrom-Json
+          foreach ($release in $releases) {
+            gh api --method DELETE "repos/$env:REPOSITORY/releases/$($release.id)"
+          }
+
+          # latest 是固定 tag，因此每次手动发布都会覆盖为当前提交。
+          gh api --method DELETE "repos/$env:REPOSITORY/git/refs/tags/latest" 2>$null
+          gh release create latest "dist/RoutePilot.exe" `
+            --repo "$env:REPOSITORY" `
+            --target "$env:COMMIT_SHA" `
+            --title "RoutePilot $env:APP_VERSION" `
+            --notes "由 GitHub Actions 手动构建：$env:COMMIT_SHA" `
+            --latest
