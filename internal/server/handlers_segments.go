@@ -146,8 +146,7 @@ func (s *Server) hDeleteSegment(c *gin.Context) {
 	noContent(c)
 }
 
-// activateBinding 事务内：清该段活动，再把目标网关设为活动（upsert 绑定）。
-// 校验网段/网关存在；不存在返回错误。
+// activateBinding 将网关加入该网段的多网关集合，不影响其他已选网关。
 func (s *Server) activateBinding(segmentID, gatewayID uint) error {
 	if segmentID == 0 || gatewayID == 0 {
 		return gorm.ErrInvalidTransaction
@@ -178,6 +177,41 @@ func (s *Server) activateBinding(segmentID, gatewayID uint) error {
 	})
 }
 
+// switchBinding 是“切换到某网关”的独占语义：保留历史绑定记录，但禁用同网段
+// 的其他网关，避免批量切换后旧、新网关同时生效。
+func (s *Server) switchBinding(segmentID, gatewayID uint) error {
+	if segmentID == 0 || gatewayID == 0 {
+		return gorm.ErrInvalidTransaction
+	}
+	var segCnt, gwCnt int64
+	if err := s.db.Model(&models.Segment{}).Where("id = ?", segmentID).Count(&segCnt).Error; err != nil {
+		return err
+	}
+	if segCnt == 0 {
+		return fmt.Errorf("网段 %d 不存在", segmentID)
+	}
+	if err := s.db.Model(&models.Gateway{}).Where("id = ? AND enabled = 1", gatewayID).Count(&gwCnt).Error; err != nil {
+		return err
+	}
+	if gwCnt == 0 {
+		return fmt.Errorf("网关 %d 不存在或已禁用", gatewayID)
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Binding{}).Where("segment_id = ?", segmentID).Updates(map[string]any{"enabled": false, "is_active": false}).Error; err != nil {
+			return err
+		}
+		var b models.Binding
+		err := tx.Where("segment_id = ? AND gateway_id = ?", segmentID, gatewayID).First(&b).Error
+		if err == gorm.ErrRecordNotFound {
+			return tx.Create(&models.Binding{SegmentID: segmentID, GatewayID: gatewayID, IsActive: true, Enabled: true, Position: 0}).Error
+		}
+		if err != nil {
+			return err
+		}
+		return tx.Model(&b).Updates(map[string]any{"enabled": true, "is_active": true, "position": 0}).Error
+	})
+}
+
 func (s *Server) hSwitchSegment(c *gin.Context) {
 	if !s.elevated {
 		fail(c, 403, "当前不是管理员权限，无法切换系统路由")
@@ -195,7 +229,7 @@ func (s *Server) hSwitchSegment(c *gin.Context) {
 		fail(c, 400, "参数错误")
 		return
 	}
-	if err := s.activateBinding(id, body.GatewayID); err != nil {
+	if err := s.switchBinding(id, body.GatewayID); err != nil {
 		fail(c, 409, "切换失败: "+err.Error())
 		return
 	}
@@ -217,8 +251,13 @@ func (s *Server) hBatchSwitch(c *gin.Context) {
 		return
 	}
 	results := []gin.H{}
+	seen := map[uint]bool{}
 	for _, sid := range body.SegmentIDs {
-		if err := s.activateBinding(sid, body.GatewayID); err != nil {
+		if sid == 0 || seen[sid] {
+			continue
+		}
+		seen[sid] = true
+		if err := s.switchBinding(sid, body.GatewayID); err != nil {
 			results = append(results, gin.H{"segment_id": sid, "ok": false, "error": err.Error()})
 		} else {
 			results = append(results, gin.H{"segment_id": sid, "ok": true})

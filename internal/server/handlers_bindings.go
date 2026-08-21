@@ -94,7 +94,7 @@ func (s *Server) hUpdateBinding(c *gin.Context) {
 		}
 	}
 	if body.IsActive != nil && *body.IsActive {
-		if err := s.activateBinding(b.SegmentID, b.GatewayID); err != nil {
+		if err := s.switchBinding(b.SegmentID, b.GatewayID); err != nil {
 			fail(c, 409, "切换失败: "+err.Error())
 			return
 		}
@@ -133,7 +133,7 @@ func (s *Server) hSetActive(c *gin.Context) {
 		fail(c, 400, "参数错误")
 		return
 	}
-	if err := s.activateBinding(body.SegmentID, body.GatewayID); err != nil {
+	if err := s.switchBinding(body.SegmentID, body.GatewayID); err != nil {
 		fail(c, 409, "切换失败: "+err.Error())
 		return
 	}

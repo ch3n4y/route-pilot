@@ -202,7 +202,7 @@ func TestDeleteCascadesBindings(t *testing.T) {
 	}
 }
 
-func TestActivateBindingKeepsExistingGatewaysEnabled(t *testing.T) {
+func TestSwitchBindingDisablesExistingGateways(t *testing.T) {
 	gdb, err := db.Open(&config.AppConfig{DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -218,14 +218,14 @@ func TestActivateBindingKeepsExistingGatewaysEnabled(t *testing.T) {
 	_ = gdb.Create(&models.Binding{SegmentID: seg.ID, GatewayID: newGateway.ID, Enabled: true}).Error
 
 	s := &Server{db: gdb, eng: sync.New(gdb), elevated: true}
-	if err := s.activateBinding(seg.ID, newGateway.ID); err != nil {
+	if err := s.switchBinding(seg.ID, newGateway.ID); err != nil {
 		t.Fatal(err)
 	}
 	var bindings []models.Binding
 	if err := gdb.Where("segment_id = ?", seg.ID).Find(&bindings).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(bindings) != 2 || !bindings[0].Enabled || !bindings[1].Enabled {
+	if len(bindings) != 2 || bindings[0].Enabled || !bindings[1].Enabled || !bindings[1].IsActive {
 		t.Fatalf("unexpected bindings after switch: %+v", bindings)
 	}
 }
